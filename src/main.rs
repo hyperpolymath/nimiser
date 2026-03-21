@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
-// nimiser CLI — Generate performant C libraries via Nim metaprogramming
+// nimiser CLI — Generate performant C libraries via Nim metaprogramming.
 // Part of the hyperpolymath -iser family. See README.adoc for architecture.
+//
+// Usage:
+//   nimiser init [--path .]         Create a new nimiser.toml manifest
+//   nimiser validate [-m file]      Validate a manifest
+//   nimiser generate [-m file]      Generate .nim source and build commands
+//   nimiser build [-m file]         Compile the generated Nim to C library
+//   nimiser run [-m file]           Run the compiled binary
+//   nimiser info [-m file]          Print manifest summary
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-mod codegen;
-mod manifest;
+use nimiser::codegen;
+use nimiser::manifest;
 
 /// nimiser — Generate performant C libraries via Nim metaprogramming
 #[derive(Parser)]
@@ -31,21 +39,21 @@ enum Commands {
         #[arg(short, long, default_value = "nimiser.toml")]
         manifest: String,
     },
-    /// Generate Nim wrapper, Zig FFI bridge, and C headers from the manifest.
+    /// Generate Nim wrapper code and build commands from the manifest.
     Generate {
         #[arg(short, long, default_value = "nimiser.toml")]
         manifest: String,
-        #[arg(short, long, default_value = "generated/nimiser")]
-        output: String,
+        #[arg(short, long)]
+        output: Option<String>,
     },
-    /// Build the generated artifacts.
+    /// Build the generated Nim library into a C library.
     Build {
         #[arg(short, long, default_value = "nimiser.toml")]
         manifest: String,
         #[arg(long)]
         release: bool,
     },
-    /// Run the nimiserd workload.
+    /// Run the compiled workload.
     Run {
         #[arg(short, long, default_value = "nimiser.toml")]
         manifest: String,
@@ -69,16 +77,18 @@ fn main() -> Result<()> {
         Commands::Validate { manifest } => {
             let m = manifest::load_manifest(&manifest)?;
             manifest::validate(&m)?;
-            println!("Manifest valid: {}", m.workload.name);
+            println!("Manifest valid: {}", m.project.name);
         }
         Commands::Generate { manifest, output } => {
             let m = manifest::load_manifest(&manifest)?;
             manifest::validate(&m)?;
-            codegen::generate_all(&m, &output)?;
-            println!("Generated Nim artifacts in: {}", output);
+            let out_dir = output.unwrap_or_else(|| m.nim.out_dir.clone());
+            codegen::generate_all(&m, &out_dir)?;
+            println!("Generated Nim artifacts in: {}", out_dir);
         }
         Commands::Build { manifest, release } => {
             let m = manifest::load_manifest(&manifest)?;
+            manifest::validate(&m)?;
             codegen::build(&m, release)?;
         }
         Commands::Run { manifest, args } => {
