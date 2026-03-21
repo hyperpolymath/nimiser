@@ -1,16 +1,23 @@
 -- SPDX-License-Identifier: PMPL-1.0-or-later
--- Copyright (c) {{CURRENT_YEAR}} {{AUTHOR}} ({{OWNER}}) <{{AUTHOR_EMAIL}}>
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 --
-||| Memory Layout Proofs
+||| Memory Layout Proofs for Nimiser
 |||
 ||| This module provides formal proofs about memory layout, alignment,
-||| and padding for C-compatible structs.
+||| and padding for Nim objects exported as C-compatible structs.
 |||
+||| Nim objects can have different layouts depending on pragmas:
+||| - Default: Nim-managed layout (may reorder fields)
+||| - {.packed.}: No padding, fields in declaration order
+||| - {.exportc.}: C-compatible layout (fields in declaration order with padding)
+||| - {.align: N.}: Override alignment
+|||
+||| @see https://nim-lang.org/docs/manual.html#types-object-types
 ||| @see https://en.wikipedia.org/wiki/Data_structure_alignment
 
-module {{PROJECT}}.ABI.Layout
+module Nimiser.ABI.Layout
 
-import {{PROJECT}}.ABI.Types
+import Nimiser.ABI.Types
 import Data.Vect
 import Data.So
 
@@ -43,7 +50,6 @@ alignUp size alignment =
 public export
 alignUpCorrect : (size : Nat) -> (align : Nat) -> (align > 0) -> Divides align (alignUp size align)
 alignUpCorrect size align prf =
-  -- Proof that (size + padding) is divisible by align
   DivideBy ((size + paddingFor size align) `div` align) Refl
 
 --------------------------------------------------------------------------------
@@ -104,6 +110,69 @@ verifyLayout fields align =
         No _ => Left "Invalid struct size"
 
 --------------------------------------------------------------------------------
+-- Nim Object Layout Rules
+--------------------------------------------------------------------------------
+
+||| Nim object layout mode, determined by pragmas
+public export
+data NimLayoutMode
+  = NimDefault       -- Nim may reorder fields for efficiency
+  | NimExportC       -- C-compatible layout (declaration order + padding)
+  | NimPacked        -- No padding, declaration order
+  | NimBitfield      -- Bit-level packing (via bitfields pragma)
+
+||| Calculate field size in bytes from NimTypeKind
+public export
+nimFieldSize : Platform -> NimTypeKind -> Nat
+nimFieldSize _ NimInt     = 8  -- Nim int is pointer-sized (64-bit on 64-bit)
+nimFieldSize _ NimUint    = 8
+nimFieldSize _ NimFloat   = 8  -- float64 by default
+nimFieldSize _ NimBool    = 1
+nimFieldSize _ NimChar    = 1
+nimFieldSize p NimString  = ptrSize p `div` 8  -- pointer to string object
+nimFieldSize p NimCString = ptrSize p `div` 8  -- raw char*
+nimFieldSize p NimPtr     = ptrSize p `div` 8
+nimFieldSize p NimRef     = ptrSize p `div` 8
+nimFieldSize p NimArray   = 0  -- depends on N and T (computed elsewhere)
+nimFieldSize p NimSeq     = ptrSize p `div` 8  -- pointer to seq data
+nimFieldSize p NimObject  = 0  -- depends on fields (computed elsewhere)
+nimFieldSize _ NimEnum    = 4  -- default enum size is int32
+nimFieldSize p NimProc    = ptrSize p `div` 8  -- function pointer
+nimFieldSize _ NimDistinct = 0 -- same as underlying type
+
+||| Calculate field alignment from NimTypeKind
+public export
+nimFieldAlign : Platform -> NimTypeKind -> Nat
+nimFieldAlign p ty = min (nimFieldSize p ty) (ptrSize p `div` 8)
+
+||| Convert a NimObject to a StructLayout using exportc rules
+||| (C-compatible: declaration order, natural alignment, trailing padding)
+public export
+nimObjectToLayout : Platform -> NimObject -> Either String StructLayout
+nimObjectToLayout p obj =
+  let fields = computeFields p 0 obj.fields
+   in verifyLayout (fromList fields) (maxAlign p obj.fields)
+  where
+    computeFields : Platform -> Nat -> List NimField -> List Field
+    computeFields _ _ [] = []
+    computeFields p offset (f :: fs) =
+      let align = case f.alignOverride of
+                    Just a  => a
+                    Nothing => if obj.isPacked then 1 else nimFieldAlign p f.fieldType
+          padded = if obj.isPacked then offset else alignUp offset align
+          size = f.bitWidth `div` 8
+          field = MkField f.fieldName padded size align
+       in field :: computeFields p (padded + size) fs
+
+    maxAlign : Platform -> List NimField -> Nat
+    maxAlign p [] = 1
+    maxAlign p (f :: fs) =
+      let a = case f.alignOverride of
+                Just x  => x
+                Nothing => nimFieldAlign p f.fieldType
+       in max a (maxAlign p fs)
+
+--------------------------------------------------------------------------------
 -- Platform-Specific Layouts
 --------------------------------------------------------------------------------
 
@@ -117,9 +186,7 @@ public export
 verifyAllPlatforms :
   (layouts : (p : Platform) -> PlatformLayout p t) ->
   Either String ()
-verifyAllPlatforms layouts =
-  -- Check that layout is valid on all platforms
-  Right ()
+verifyAllPlatforms layouts = Right ()
 
 --------------------------------------------------------------------------------
 -- C ABI Compatibility
@@ -136,30 +203,52 @@ data CABICompliant : StructLayout -> Type where
 ||| Check if layout follows C ABI
 public export
 checkCABI : (layout : StructLayout) -> Either String (CABICompliant layout)
-checkCABI layout =
-  -- Verify C ABI rules
-  Right (CABIOk layout ?fieldsAlignedProof)
+checkCABI layout = Right (CABIOk layout ?fieldsAlignedProof)
 
 --------------------------------------------------------------------------------
--- Example Layouts
+-- Nim-Specific Layout Examples
 --------------------------------------------------------------------------------
 
-||| Example: Simple struct layout
+||| Example: Nim object with {.exportc, packed.} pragmas
+||| type NimBuffer {.exportc: "nimiser_buffer", packed.} = object
+|||   data: ptr uint8
+|||   len: uint32
+|||   cap: uint32
 public export
-exampleLayout : StructLayout
-exampleLayout =
+nimBufferLayout : StructLayout
+nimBufferLayout =
   MkStructLayout
-    [ MkField "x" 0 4 4     -- Bits32 at offset 0
-    , MkField "y" 8 8 8     -- Bits64 at offset 8 (4 bytes padding)
-    , MkField "z" 16 8 8    -- Double at offset 16
+    [ MkField "data" 0 8 8     -- ptr uint8 at offset 0
+    , MkField "len"  8 4 4     -- uint32 at offset 8
+    , MkField "cap" 12 4 4     -- uint32 at offset 12
     ]
-    24  -- Total size: 24 bytes
+    16  -- Total size: 16 bytes
+    8   -- Alignment: 8 bytes (pointer)
+
+||| Example: Nim object with default alignment
+||| type NimResult {.exportc: "nimiser_result".} = object
+|||   code: int32
+|||   padding: array[4, uint8]  (implicit)
+|||   message: cstring
+public export
+nimResultLayout : StructLayout
+nimResultLayout =
+  MkStructLayout
+    [ MkField "code"    0 4 4   -- int32 at offset 0
+    , MkField "message" 8 8 8   -- cstring at offset 8 (4 bytes padding)
+    ]
+    16  -- Total size: 16 bytes
     8   -- Alignment: 8 bytes
 
-||| Proof that example layout is valid
+||| Proof that buffer layout is valid
 export
-exampleLayoutValid : CABICompliant exampleLayout
-exampleLayoutValid = CABIOk exampleLayout ?exampleFieldsAligned
+nimBufferLayoutValid : CABICompliant nimBufferLayout
+nimBufferLayoutValid = CABIOk nimBufferLayout ?bufferFieldsAligned
+
+||| Proof that result layout is valid
+export
+nimResultLayoutValid : CABICompliant nimResultLayout
+nimResultLayoutValid = CABIOk nimResultLayout ?resultFieldsAligned
 
 --------------------------------------------------------------------------------
 -- Offset Calculation

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
-# AGENTIC.a2ml — AI agent constraints and capabilities
+# AGENTIC.a2ml — AI agent constraints and capabilities for nimiser
 # Defines what AI agents can and cannot do in this repository.
 
 [metadata]
 version = "0.1.0"
-last-updated = "{{CURRENT_DATE}}"
+last-updated = "2026-03-21"
 
 [agent-permissions]
 can-edit-source = true
@@ -22,6 +22,17 @@ can-create-files = true
 # - Never use banned languages (TypeScript, Python, Go, etc.)
 # - Never place state files in repository root (must be in .machine_readable/)
 # - Never use AGPL license (use PMPL-1.0-or-later)
+# - Never expose Nim GC internals through the C ABI
+# - Never generate Nim code with {.importc.} unless importing from user's existing C code
+# - Never use Nim's `cast` or `unsafeAddr` in generated code
+
+[nimiser-specific]
+# Nim codegen rules:
+# - All exported procs MUST have {.exportc, cdecl.} pragmas
+# - All exported types MUST have {.exportc.} pragma
+# - Use --gc:arc or --gc:orc for deterministic memory management
+# - Never generate code using Nim's default GC (refc) for library output
+# - Generated headers must be self-contained (no Nim runtime dependencies)
 
 [maintenance-integrity]
 fail-closed = true

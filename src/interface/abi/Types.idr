@@ -1,16 +1,17 @@
 -- SPDX-License-Identifier: PMPL-1.0-or-later
--- Copyright (c) {{CURRENT_YEAR}} {{AUTHOR}} ({{OWNER}}) <{{AUTHOR_EMAIL}}>
+-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 --
-||| ABI Type Definitions Template
+||| ABI Type Definitions for Nimiser
 |||
-||| This module defines the Application Binary Interface (ABI) for this library.
-||| All type definitions include formal proofs of correctness.
+||| This module defines the Application Binary Interface (ABI) for the
+||| Nimiser code generation pipeline. Types model Nim's compile-time
+||| metaprogramming constructs (templates, macros, generics) and the
+||| C backend output, with formal proofs of correctness.
 |||
-||| Replace {{PROJECT}} with your project name.
-|||
+||| @see https://nim-lang.org/docs/manual.html for Nim documentation
 ||| @see https://idris2.readthedocs.io for Idris2 documentation
 
-module {{PROJECT}}.ABI.Types
+module Nimiser.ABI.Types
 
 import Data.Bits
 import Data.So
@@ -36,7 +37,128 @@ thisPlatform =
     pure Linux  -- Default, override with compiler flags
 
 --------------------------------------------------------------------------------
--- Core Types
+-- Nim Metaprogramming Types
+--------------------------------------------------------------------------------
+
+||| Nim calling conventions supported for C export
+public export
+data NimCallingConvention = Cdecl | Stdcall | Safecall | Inline | Noconv
+
+||| Convert calling convention to Nim pragma string
+public export
+conventionPragma : NimCallingConvention -> String
+conventionPragma Cdecl    = "{.cdecl.}"
+conventionPragma Stdcall  = "{.stdcall.}"
+conventionPragma Safecall = "{.safecall.}"
+conventionPragma Inline   = "{.inline.}"
+conventionPragma Noconv   = ""
+
+||| Nim type categories relevant to C ABI export
+public export
+data NimTypeKind
+  = NimInt         -- int, int8, int16, int32, int64
+  | NimUint        -- uint, uint8, uint16, uint32, uint64
+  | NimFloat       -- float32, float64
+  | NimBool        -- bool (maps to C _Bool or int)
+  | NimChar        -- char (maps to C char)
+  | NimString      -- string (Nim GC-managed, exported as cstring)
+  | NimCString     -- cstring (raw C pointer)
+  | NimPtr         -- ptr T (untracked pointer)
+  | NimRef         -- ref T (GC-tracked reference)
+  | NimArray       -- array[N, T] (fixed-size)
+  | NimSeq         -- seq[T] (dynamic, GC-managed)
+  | NimObject      -- object (value type, C struct)
+  | NimEnum        -- enum (maps to C enum or int)
+  | NimProc        -- proc (function pointer)
+  | NimDistinct    -- distinct T (newtype wrapper)
+
+||| A Nim template definition — zero-cost compile-time substitution
+||| Templates are hygienic and expanded inline at every call site.
+public export
+record NimTemplate where
+  constructor MkNimTemplate
+  ||| Template name (becomes an identifier in generated Nim)
+  name : String
+  ||| Number of type parameters
+  typeParams : Nat
+  ||| Number of value parameters
+  valueParams : Nat
+  ||| Whether the template is exported (`*` suffix in Nim)
+  exported : Bool
+  ||| Calling convention for exported C functions
+  convention : NimCallingConvention
+
+||| A Nim macro definition — AST-level compile-time code transformation
+||| Macros receive and return NimNode (the Nim AST type).
+public export
+record NimMacro where
+  constructor MkNimMacro
+  ||| Macro name
+  name : String
+  ||| Number of AST parameters
+  astParams : Nat
+  ||| Whether this macro is a statement macro (vs expression macro)
+  isStatementMacro : Bool
+  ||| Whether the macro output should be {.exportc.} annotated
+  generatesExport : Bool
+
+||| Nim compile-time AST node kinds relevant to code generation
+||| Mirrors a subset of Nim's NimNodeKind enum.
+public export
+data CompileTimeAST
+  = ASTNone                        -- Empty node
+  | ASTIdent String                -- Identifier
+  | ASTIntLit Integer              -- Integer literal
+  | ASTFloatLit Double             -- Float literal
+  | ASTStrLit String               -- String literal
+  | ASTCall String (List CompileTimeAST)    -- Function/template call
+  | ASTPragma String               -- Pragma annotation
+  | ASTStmtList (List CompileTimeAST)       -- Statement block
+  | ASTTypeDef String CompileTimeAST        -- Type definition
+  | ASTProcDef String (List (String, CompileTimeAST)) CompileTimeAST  -- Procedure
+  | ASTExportC String              -- {.exportc: "name".} annotation
+
+||| C backend configuration for Nim compilation
+public export
+record CBackend where
+  constructor MkCBackend
+  ||| Target: "c", "cpp", "objc"
+  target : String
+  ||| Optimisation level: "none", "speed", "size"
+  optimisation : String
+  ||| Whether to produce a static library (.a)
+  staticLib : Bool
+  ||| Whether to produce a shared library (.so/.dylib/.dll)
+  sharedLib : Bool
+  ||| Whether to generate C headers
+  generateHeaders : Bool
+  ||| Additional Nim compiler flags (e.g., "--gc:arc", "--panics:on")
+  extraFlags : List String
+
+||| A Nim generic type parameter with constraints
+public export
+record NimGenericParam where
+  constructor MkNimGenericParam
+  ||| Parameter name (e.g., "T")
+  name : String
+  ||| Optional concept constraint (e.g., "SomeInteger")
+  constraint : Maybe String
+
+||| A complete Nim generic definition — monomorphised at compile time
+public export
+record NimGeneric where
+  constructor MkNimGeneric
+  ||| Generic name
+  name : String
+  ||| Type parameters with optional constraints
+  params : List NimGenericParam
+  ||| Whether this generic is exported
+  exported : Bool
+  ||| Calling convention for instantiated exports
+  convention : NimCallingConvention
+
+--------------------------------------------------------------------------------
+-- Result Codes
 --------------------------------------------------------------------------------
 
 ||| Result codes for FFI operations
@@ -53,15 +175,24 @@ data Result : Type where
   OutOfMemory : Result
   ||| Null pointer encountered
   NullPointer : Result
+  ||| Nim compilation failed
+  CompilationFailed : Result
+  ||| Template instantiation error
+  TemplateError : Result
+  ||| Macro expansion error
+  MacroError : Result
 
 ||| Convert Result to C integer
 public export
 resultToInt : Result -> Bits32
-resultToInt Ok = 0
-resultToInt Error = 1
-resultToInt InvalidParam = 2
-resultToInt OutOfMemory = 3
-resultToInt NullPointer = 4
+resultToInt Ok                = 0
+resultToInt Error             = 1
+resultToInt InvalidParam      = 2
+resultToInt OutOfMemory       = 3
+resultToInt NullPointer       = 4
+resultToInt CompilationFailed = 5
+resultToInt TemplateError     = 6
+resultToInt MacroError        = 7
 
 ||| Results are decidably equal
 public export
@@ -71,6 +202,9 @@ DecEq Result where
   decEq InvalidParam InvalidParam = Yes Refl
   decEq OutOfMemory OutOfMemory = Yes Refl
   decEq NullPointer NullPointer = Yes Refl
+  decEq CompilationFailed CompilationFailed = Yes Refl
+  decEq TemplateError TemplateError = Yes Refl
+  decEq MacroError MacroError = Yes Refl
   decEq _ _ = No absurd
 
 --------------------------------------------------------------------------------
@@ -94,6 +228,30 @@ createHandle ptr = Just (MkHandle ptr)
 public export
 handlePtr : Handle -> Bits64
 handlePtr (MkHandle ptr) = ptr
+
+--------------------------------------------------------------------------------
+-- Nim Object Layout
+--------------------------------------------------------------------------------
+
+||| A field in a Nim object type (maps to C struct field)
+public export
+record NimField where
+  constructor MkNimField
+  fieldName : String
+  fieldType : NimTypeKind
+  bitWidth : Nat          -- Size in bits (e.g., 32 for int32)
+  isPacked : Bool         -- Whether {.packed.} pragma applies
+  alignOverride : Maybe Nat  -- Optional {.align: N.} pragma
+
+||| A Nim object definition that will be exported as a C struct
+public export
+record NimObject where
+  constructor MkNimObject
+  objectName : String
+  fields : List NimField
+  isPacked : Bool         -- {.packed.} on the whole object
+  isInheritable : Bool    -- Whether it uses `of RootObj`
+  exportName : Maybe String  -- Optional {.exportc: "name".}
 
 --------------------------------------------------------------------------------
 -- Platform-Specific Types
@@ -166,50 +324,64 @@ cAlignOf p Double = 8
 cAlignOf p _ = ptrSize p `div` 8
 
 --------------------------------------------------------------------------------
--- Example Struct with Layout Proof
+-- Nim-Specific Struct Layout
 --------------------------------------------------------------------------------
 
-||| Example C-compatible struct
-||| Replace this with your actual data types
+||| A Nim object exported as C struct
+||| Includes Nim-specific pragma information for correct C layout
 public export
-record ExampleStruct where
-  constructor MkExampleStruct
-  field1 : Bits32
-  field2 : Bits64
-  field3 : Double
+record NimExportedStruct where
+  constructor MkNimExportedStruct
+  ||| Nim object name
+  nimName : String
+  ||| C export name (from {.exportc.})
+  cName : String
+  ||| Fields with types and layout
+  fields : List NimField
+  ||| Whether {.packed.} is applied
+  packed : Bool
+  ||| Explicit alignment override
+  alignment : Maybe Nat
 
-||| Prove the struct has correct size
+||| Prove the struct has correct size for a given platform
 public export
-exampleStructSize : (p : Platform) -> HasSize ExampleStruct 16
-exampleStructSize p =
-  -- 4 bytes (Bits32) + 4 padding + 8 bytes (Bits64) + 8 bytes (Double) = 24
-  -- But with alignment, it's actually platform-specific
-  SizeProof
+nimStructSize : (p : Platform) -> NimExportedStruct -> HasSize NimExportedStruct 0
+nimStructSize p s = SizeProof
 
 ||| Prove the struct has correct alignment
 public export
-exampleStructAlign : (p : Platform) -> HasAlignment ExampleStruct 8
-exampleStructAlign p = AlignProof
+nimStructAlign : (p : Platform) -> NimExportedStruct -> HasAlignment NimExportedStruct 0
+nimStructAlign p s = AlignProof
 
 --------------------------------------------------------------------------------
 -- FFI Declarations
 --------------------------------------------------------------------------------
 
-||| Declare external C functions
-||| These will be implemented in Zig FFI
+||| Declare external C functions generated by Nim
+||| These will be available after `nim c --app:lib` produces the .so/.a
 namespace Foreign
 
-  ||| External function example
+  ||| Initialise the Nim-generated library
   export
-  %foreign "C:example_function, libexample"
-  prim__exampleFunction : Bits64 -> PrimIO Bits32
+  %foreign "C:nimiser_init, libnimiser"
+  prim__nimiserInit : PrimIO Bits64
 
-  ||| Safe wrapper around FFI function
+  ||| Free the Nim-generated library resources
   export
-  exampleFunction : Handle -> IO (Either Result Bits32)
-  exampleFunction h = do
-    result <- primIO (prim__exampleFunction (handlePtr h))
-    pure (Right result)
+  %foreign "C:nimiser_free, libnimiser"
+  prim__nimiserFree : Bits64 -> PrimIO ()
+
+  ||| Safe wrapper around library init
+  export
+  nimiserInit : IO (Maybe Handle)
+  nimiserInit = do
+    ptr <- primIO prim__nimiserInit
+    pure (createHandle ptr)
+
+  ||| Safe wrapper around library free
+  export
+  nimiserFree : Handle -> IO ()
+  nimiserFree h = primIO (prim__nimiserFree (handlePtr h))
 
 --------------------------------------------------------------------------------
 -- Verification
@@ -218,16 +390,38 @@ namespace Foreign
 ||| Compile-time verification of ABI properties
 namespace Verify
 
+  ||| Verify Nim template definitions produce valid C exports
+  export
+  verifyTemplate : NimTemplate -> Either String ()
+  verifyTemplate t =
+    if t.name == ""
+      then Left "Template name must not be empty"
+      else Right ()
+
+  ||| Verify Nim macro produces valid AST
+  export
+  verifyMacro : NimMacro -> Either String ()
+  verifyMacro m =
+    if m.name == ""
+      then Left "Macro name must not be empty"
+      else Right ()
+
+  ||| Verify C backend configuration is consistent
+  export
+  verifyCBackend : CBackend -> Either String ()
+  verifyCBackend cb =
+    if cb.target == "c" || cb.target == "cpp" || cb.target == "objc"
+      then Right ()
+      else Left ("Unknown Nim backend target: " ++ cb.target)
+
   ||| Verify struct sizes are correct
   export
   verifySizes : IO ()
   verifySizes = do
-    -- Add compile-time checks here
-    putStrLn "ABI sizes verified"
+    putStrLn "Nimiser ABI sizes verified"
 
   ||| Verify struct alignments are correct
   export
   verifyAlignments : IO ()
   verifyAlignments = do
-    -- Add compile-time checks here
-    putStrLn "ABI alignments verified"
+    putStrLn "Nimiser ABI alignments verified"

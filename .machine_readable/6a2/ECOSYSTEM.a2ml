@@ -6,13 +6,14 @@
   (version "0.1.0")
   (name "nimiser")
   (type "tool")
-  (purpose "Generate high-performance C libraries via Nim metaprogramming")
+  (purpose "Generate high-performance C libraries via Nim metaprogramming (templates, macros, generics -> optimised C)")
 
   (position-in-ecosystem
     (family "-iser acceleration frameworks")
     (meta-framework "iseriser")
     (relationship "sibling")
-    (top-3 ("typedqliser" "chapeliser" "verisimiser")))
+    (top-3 ("typedqliser" "chapeliser" "verisimiser"))
+    (unique-value "Nim's compile-time metaprogramming produces zero-overhead C libraries from high-level descriptions — templates for generic abstractions, macros for AST transforms, generics for type specialisation"))
 
   (related-projects
     (project "iseriser"
@@ -35,4 +36,7 @@
       (description "Shared Idris2 verified library"))
     (project "typell"
       (relationship "dependency")
-      (description "Type theory engine"))))
+      (description "Type theory engine"))
+    (project "nim-lang"
+      (relationship "upstream-dependency")
+      (description "Andreas Rumpf's Nim compiler — the target language whose metaprogramming nimiser exploits"))))
