@@ -51,10 +51,7 @@ fn test_parse_fast_lib_functions() {
     assert_eq!(add.params.len(), 2);
     assert_eq!(add.params[0].name, "a");
     assert_eq!(add.params[0].nim_type, NimType::Primitive("cint".into()));
-    assert_eq!(
-        add.return_type,
-        Some(NimType::Primitive("cint".into()))
-    );
+    assert_eq!(add.return_type, Some(NimType::Primitive("cint".into())));
     assert!(add.pragmas.contains(&NimPragma::Exportc));
     assert!(add.pragmas.contains(&NimPragma::Cdecl));
 
@@ -91,8 +88,9 @@ fn test_generate_nim_source_content() {
         "Missing fast_add proc declaration"
     );
     assert!(
-        nim_source
-            .contains("proc fast_multiply(x: cdouble, y: cdouble): cdouble {.exportc, cdecl, noSideEffect.} ="),
+        nim_source.contains(
+            "proc fast_multiply(x: cdouble, y: cdouble): cdouble {.exportc, cdecl, noSideEffect.} ="
+        ),
         "Missing fast_multiply proc declaration"
     );
     assert!(
@@ -265,10 +263,19 @@ opt-level = "speed"
     let m = manifest::load_manifest(&path).unwrap();
     let cmd = build_gen::build_command_from_manifest(&m, "c_lib.nim", true);
     let rendered = cmd.render();
-    assert!(rendered.starts_with("nim c"), "C backend should use 'nim c'");
+    assert!(
+        rendered.starts_with("nim c"),
+        "C backend should use 'nim c'"
+    );
     assert!(rendered.contains("--gc:arc"), "Should use ARC GC");
-    assert!(rendered.contains("--app:lib"), "C target should compile as library");
-    assert!(rendered.contains("-d:release"), "Release build should have -d:release");
+    assert!(
+        rendered.contains("--app:lib"),
+        "C target should compile as library"
+    );
+    assert!(
+        rendered.contains("-d:release"),
+        "Release build should have -d:release"
+    );
 
     // Test JS + ORC
     let dir2 = TempDir::new().unwrap();
@@ -286,9 +293,15 @@ opt-level = "none"
     let m_js = manifest::load_manifest(&path_js).unwrap();
     let cmd_js = build_gen::build_command_from_manifest(&m_js, "js_lib.nim", false);
     let rendered_js = cmd_js.render();
-    assert!(rendered_js.starts_with("nim js"), "JS backend should use 'nim js'");
+    assert!(
+        rendered_js.starts_with("nim js"),
+        "JS backend should use 'nim js'"
+    );
     assert!(rendered_js.contains("--gc:orc"), "Should use ORC GC");
-    assert!(!rendered_js.contains("--app:lib"), "JS target should not use --app:lib");
+    assert!(
+        !rendered_js.contains("--app:lib"),
+        "JS target should not use --app:lib"
+    );
 
     // Test CPP + None GC
     let dir3 = TempDir::new().unwrap();
@@ -306,9 +319,15 @@ opt-level = "size"
     let m_cpp = manifest::load_manifest(&path_cpp).unwrap();
     let cmd_cpp = build_gen::build_command_from_manifest(&m_cpp, "cpp_lib.nim", true);
     let rendered_cpp = cmd_cpp.render();
-    assert!(rendered_cpp.starts_with("nim cpp"), "CPP backend should use 'nim cpp'");
+    assert!(
+        rendered_cpp.starts_with("nim cpp"),
+        "CPP backend should use 'nim cpp'"
+    );
     assert!(rendered_cpp.contains("--gc:none"), "Should use no GC");
-    assert!(rendered_cpp.contains("--opt:size"), "Should optimise for size");
+    assert!(
+        rendered_cpp.contains("--opt:size"),
+        "Should optimise for size"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +349,10 @@ fn test_init_creates_valid_manifest() {
     manifest::validate(&m).expect("Generated manifest should be valid");
 
     assert!(!m.project.name.is_empty());
-    assert!(m.functions.len() >= 2, "Template should have example functions");
+    assert!(
+        m.functions.len() >= 2,
+        "Template should have example functions"
+    );
 }
 
 // ---------------------------------------------------------------------------

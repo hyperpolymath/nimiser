@@ -167,8 +167,7 @@ pub struct LegacyOptions {
 pub fn load_manifest(path: &str) -> Result<Manifest> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read manifest: {}", path))?;
-    toml::from_str(&content)
-        .with_context(|| format!("Failed to parse manifest: {}", path))
+    toml::from_str(&content).with_context(|| format!("Failed to parse manifest: {}", path))
 }
 
 /// Validate the manifest for required fields and logical consistency.
@@ -300,7 +299,10 @@ opt-level = "speed"
 
 /// Print summary information about a loaded manifest.
 pub fn print_info(manifest: &Manifest) {
-    println!("=== {} v{} ===", manifest.project.name, manifest.project.version);
+    println!(
+        "=== {} v{} ===",
+        manifest.project.name, manifest.project.version
+    );
     if !manifest.project.description.is_empty() {
         println!("Description: {}", manifest.project.description);
     }

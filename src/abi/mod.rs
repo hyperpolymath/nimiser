@@ -14,19 +14,15 @@ use std::fmt;
 /// Nim can compile to C, C++, or JavaScript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CompilationTarget {
     /// Compile to C (default, best for system libraries).
+    #[default]
     C,
     /// Compile to C++ (for C++ interop).
     Cpp,
     /// Compile to JavaScript (for browser/Deno targets).
     Js,
-}
-
-impl Default for CompilationTarget {
-    fn default() -> Self {
-        CompilationTarget::C
-    }
 }
 
 impl fmt::Display for CompilationTarget {
@@ -43,19 +39,15 @@ impl fmt::Display for CompilationTarget {
 /// ARC and ORC are the modern, deterministic options; None disables GC entirely.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum GcStrategy {
     /// ARC — deterministic reference counting with move semantics.
+    #[default]
     Arc,
     /// ORC — ARC + cycle collector for cyclic data structures.
     Orc,
     /// No GC — fully manual memory management.
     None,
-}
-
-impl Default for GcStrategy {
-    fn default() -> Self {
-        GcStrategy::Arc
-    }
 }
 
 impl fmt::Display for GcStrategy {
@@ -124,10 +116,7 @@ pub enum NimType {
     /// ref T — traced (GC-managed) reference.
     Ref(Box<NimType>),
     /// array[N, T] — fixed-size array.
-    Array {
-        size: usize,
-        element: Box<NimType>,
-    },
+    Array { size: usize, element: Box<NimType> },
     /// seq[T] — dynamic sequence.
     Seq(Box<NimType>),
     /// object type with named fields.

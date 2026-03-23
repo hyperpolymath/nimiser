@@ -12,11 +12,7 @@ use crate::manifest::{FunctionConfig, Manifest};
 
 /// Parse all function declarations from a manifest into NimProc ABI types.
 pub fn parse_functions(manifest: &Manifest) -> Result<Vec<NimProc>> {
-    manifest
-        .functions
-        .iter()
-        .map(|f| parse_function(f))
-        .collect()
+    manifest.functions.iter().map(parse_function).collect()
 }
 
 /// Parse a single FunctionConfig into a NimProc.

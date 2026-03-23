@@ -118,8 +118,8 @@ pub fn run(manifest: &Manifest, args: &[String]) -> Result<()> {
         );
     }
 
-    println!("Running {} workload: {}", "nimiser", manifest.project.name);
-    let status = std::process::Command::new(&format!("./{}", binary))
+    println!("Running nimiser workload: {}", manifest.project.name);
+    let status = std::process::Command::new(format!("./{}", binary))
         .args(args)
         .status()
         .with_context(|| format!("Failed to run {}", binary))?;
