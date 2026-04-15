@@ -2,6 +2,8 @@
 # nimiser — C library generation via Nim metaprogramming
 
 # Default: build and test
+import? "contractile.just"
+
 default: build test
 
 # Build release binary
