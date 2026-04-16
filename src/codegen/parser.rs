@@ -166,7 +166,7 @@ mod tests {
             pragmas: vec!["exportc".into(), "cdecl".into()],
             doc: "Say hello.".into(),
         };
-        let proc = parse_function(&func).unwrap();
+        let proc = parse_function(&func).expect("TODO: handle error");
         assert_eq!(proc.name, "greet");
         assert_eq!(proc.params.len(), 1);
         assert_eq!(proc.return_type, Some(NimType::Primitive("cstring".into())));
@@ -183,7 +183,7 @@ mod tests {
             pragmas: vec!["exportc".into()],
             doc: String::new(),
         };
-        let proc = parse_function(&func).unwrap();
+        let proc = parse_function(&func).expect("TODO: handle error");
         assert!(proc.return_type.is_none());
         assert!(proc.doc.is_none());
     }
