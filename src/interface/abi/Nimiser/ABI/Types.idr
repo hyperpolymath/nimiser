@@ -16,6 +16,7 @@ module Nimiser.ABI.Types
 import Data.Bits
 import Data.So
 import Data.Vect
+import Decidable.Equality
 
 %default total
 
@@ -31,10 +32,7 @@ data Platform = Linux | Windows | MacOS | BSD | WASM
 ||| This will be set during compilation based on target
 public export
 thisPlatform : Platform
-thisPlatform =
-  %runElab do
-    -- Platform detection logic
-    pure Linux  -- Default, override with compiler flags
+thisPlatform = Linux  -- Default, override with compiler flags
 
 --------------------------------------------------------------------------------
 -- Nim Metaprogramming Types
@@ -205,7 +203,62 @@ DecEq Result where
   decEq CompilationFailed CompilationFailed = Yes Refl
   decEq TemplateError TemplateError = Yes Refl
   decEq MacroError MacroError = Yes Refl
-  decEq _ _ = No absurd
+  decEq Ok Error = No (\case Refl impossible)
+  decEq Ok InvalidParam = No (\case Refl impossible)
+  decEq Ok OutOfMemory = No (\case Refl impossible)
+  decEq Ok NullPointer = No (\case Refl impossible)
+  decEq Ok CompilationFailed = No (\case Refl impossible)
+  decEq Ok TemplateError = No (\case Refl impossible)
+  decEq Ok MacroError = No (\case Refl impossible)
+  decEq Error Ok = No (\case Refl impossible)
+  decEq Error InvalidParam = No (\case Refl impossible)
+  decEq Error OutOfMemory = No (\case Refl impossible)
+  decEq Error NullPointer = No (\case Refl impossible)
+  decEq Error CompilationFailed = No (\case Refl impossible)
+  decEq Error TemplateError = No (\case Refl impossible)
+  decEq Error MacroError = No (\case Refl impossible)
+  decEq InvalidParam Ok = No (\case Refl impossible)
+  decEq InvalidParam Error = No (\case Refl impossible)
+  decEq InvalidParam OutOfMemory = No (\case Refl impossible)
+  decEq InvalidParam NullPointer = No (\case Refl impossible)
+  decEq InvalidParam CompilationFailed = No (\case Refl impossible)
+  decEq InvalidParam TemplateError = No (\case Refl impossible)
+  decEq InvalidParam MacroError = No (\case Refl impossible)
+  decEq OutOfMemory Ok = No (\case Refl impossible)
+  decEq OutOfMemory Error = No (\case Refl impossible)
+  decEq OutOfMemory InvalidParam = No (\case Refl impossible)
+  decEq OutOfMemory NullPointer = No (\case Refl impossible)
+  decEq OutOfMemory CompilationFailed = No (\case Refl impossible)
+  decEq OutOfMemory TemplateError = No (\case Refl impossible)
+  decEq OutOfMemory MacroError = No (\case Refl impossible)
+  decEq NullPointer Ok = No (\case Refl impossible)
+  decEq NullPointer Error = No (\case Refl impossible)
+  decEq NullPointer InvalidParam = No (\case Refl impossible)
+  decEq NullPointer OutOfMemory = No (\case Refl impossible)
+  decEq NullPointer CompilationFailed = No (\case Refl impossible)
+  decEq NullPointer TemplateError = No (\case Refl impossible)
+  decEq NullPointer MacroError = No (\case Refl impossible)
+  decEq CompilationFailed Ok = No (\case Refl impossible)
+  decEq CompilationFailed Error = No (\case Refl impossible)
+  decEq CompilationFailed InvalidParam = No (\case Refl impossible)
+  decEq CompilationFailed OutOfMemory = No (\case Refl impossible)
+  decEq CompilationFailed NullPointer = No (\case Refl impossible)
+  decEq CompilationFailed TemplateError = No (\case Refl impossible)
+  decEq CompilationFailed MacroError = No (\case Refl impossible)
+  decEq TemplateError Ok = No (\case Refl impossible)
+  decEq TemplateError Error = No (\case Refl impossible)
+  decEq TemplateError InvalidParam = No (\case Refl impossible)
+  decEq TemplateError OutOfMemory = No (\case Refl impossible)
+  decEq TemplateError NullPointer = No (\case Refl impossible)
+  decEq TemplateError CompilationFailed = No (\case Refl impossible)
+  decEq TemplateError MacroError = No (\case Refl impossible)
+  decEq MacroError Ok = No (\case Refl impossible)
+  decEq MacroError Error = No (\case Refl impossible)
+  decEq MacroError InvalidParam = No (\case Refl impossible)
+  decEq MacroError OutOfMemory = No (\case Refl impossible)
+  decEq MacroError NullPointer = No (\case Refl impossible)
+  decEq MacroError CompilationFailed = No (\case Refl impossible)
+  decEq MacroError TemplateError = No (\case Refl impossible)
 
 --------------------------------------------------------------------------------
 -- Opaque Handles
@@ -221,8 +274,10 @@ data Handle : Type where
 ||| Returns Nothing if pointer is null
 public export
 createHandle : Bits64 -> Maybe Handle
-createHandle 0 = Nothing
-createHandle ptr = Just (MkHandle ptr)
+createHandle ptr =
+  case choose (ptr /= 0) of
+    Left ok => Just (MkHandle ptr {nonNull = ok})
+    Right _ => Nothing
 
 ||| Extract pointer value from handle
 public export
@@ -245,8 +300,8 @@ record NimField where
 
 ||| A Nim object definition that will be exported as a C struct
 public export
-record NimObject where
-  constructor MkNimObject
+record NimObjectDef where
+  constructor MkNimObjectDef
   objectName : String
   fields : List NimField
   isPacked : Bool         -- {.packed.} on the whole object
@@ -284,10 +339,15 @@ ptrSize MacOS = 64
 ptrSize BSD = 64
 ptrSize WASM = 32
 
-||| Pointer type for platform
+||| Pointer-sized integer type for a platform.
+||| 64-bit platforms use Bits64; WASM (32-bit) uses Bits32.
 public export
 CPtr : Platform -> Type -> Type
-CPtr p _ = Bits (ptrSize p)
+CPtr Linux   _ = Bits64
+CPtr Windows _ = Bits64
+CPtr MacOS   _ = Bits64
+CPtr BSD     _ = Bits64
+CPtr WASM    _ = Bits32
 
 --------------------------------------------------------------------------------
 -- Memory Layout Proofs
@@ -306,8 +366,8 @@ data HasAlignment : Type -> Nat -> Type where
 ||| Size of C types (platform-specific)
 public export
 cSizeOf : (p : Platform) -> (t : Type) -> Nat
-cSizeOf p (CInt _) = 4
-cSizeOf p (CSize _) = if ptrSize p == 64 then 8 else 4
+cSizeOf p Bits8 = 1
+cSizeOf p Bits16 = 2
 cSizeOf p Bits32 = 4
 cSizeOf p Bits64 = 8
 cSizeOf p Double = 8
@@ -316,8 +376,8 @@ cSizeOf p _ = ptrSize p `div` 8
 ||| Alignment of C types (platform-specific)
 public export
 cAlignOf : (p : Platform) -> (t : Type) -> Nat
-cAlignOf p (CInt _) = 4
-cAlignOf p (CSize _) = if ptrSize p == 64 then 8 else 4
+cAlignOf p Bits8 = 1
+cAlignOf p Bits16 = 2
 cAlignOf p Bits32 = 4
 cAlignOf p Bits64 = 8
 cAlignOf p Double = 8

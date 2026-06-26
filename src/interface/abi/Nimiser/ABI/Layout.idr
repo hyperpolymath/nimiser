@@ -20,6 +20,8 @@ module Nimiser.ABI.Layout
 import Nimiser.ABI.Types
 import Data.Vect
 import Data.So
+import Data.Nat
+import Decidable.Equality
 
 %default total
 
@@ -33,12 +35,25 @@ paddingFor : (offset : Nat) -> (alignment : Nat) -> Nat
 paddingFor offset alignment =
   if offset `mod` alignment == 0
     then 0
-    else alignment - (offset `mod` alignment)
+    else minus alignment (offset `mod` alignment)
 
 ||| Proof that alignment divides aligned size
 public export
 data Divides : Nat -> Nat -> Type where
   DivideBy : (k : Nat) -> {n : Nat} -> {m : Nat} -> (m = k * n) -> Divides n m
+
+||| Sound decision procedure: does n divide m?
+||| For n = S j, compute q = div m (S j) and check m == q * (S j).
+||| Division does not reduce definitionally, so the equality is checked, not
+||| asserted.
+public export
+decDivides : (n : Nat) -> (m : Nat) -> Maybe (Divides n m)
+decDivides Z _ = Nothing
+decDivides (S j) m =
+  let q = div m (S j) in
+  case decEq m (q * (S j)) of
+    Yes prf => Just (DivideBy q prf)
+    No _ => Nothing
 
 ||| Round up to next alignment boundary
 public export
@@ -46,11 +61,12 @@ alignUp : (size : Nat) -> (alignment : Nat) -> Nat
 alignUp size alignment =
   size + paddingFor size alignment
 
-||| Proof that alignUp produces aligned result
+||| Decide whether alignUp produced an aligned result for a given alignment.
+||| (Division does not reduce definitionally, so this is decided rather than
+||| proven by `Refl`; a universally-quantified `Refl` proof would be unsound.)
 public export
-alignUpCorrect : (size : Nat) -> (align : Nat) -> (align > 0) -> Divides align (alignUp size align)
-alignUpCorrect size align prf =
-  DivideBy ((size + paddingFor size align) `div` align) Refl
+alignUpCorrect : (size : Nat) -> (align : Nat) -> Maybe (Divides align (alignUp size align))
+alignUpCorrect size align = decDivides align (alignUp size align)
 
 --------------------------------------------------------------------------------
 -- Struct Field Layout
@@ -82,7 +98,7 @@ record StructLayout where
 
 ||| Calculate total struct size with padding
 public export
-calcStructSize : Vect n Field -> Nat -> Nat
+calcStructSize : Vect k Field -> Nat -> Nat
 calcStructSize [] align = 0
 calcStructSize (f :: fs) align =
   let lastOffset = foldl (\acc, field => nextFieldOffset field) f.offset fs
@@ -91,23 +107,28 @@ calcStructSize (f :: fs) align =
 
 ||| Proof that field offsets are correctly aligned
 public export
-data FieldsAligned : Vect n Field -> Type where
+data FieldsAligned : Vect k Field -> Type where
   NoFields : FieldsAligned []
   ConsField :
     (f : Field) ->
-    (rest : Vect n Field) ->
+    (rest : Vect k Field) ->
     Divides f.alignment f.offset ->
     FieldsAligned rest ->
     FieldsAligned (f :: rest)
 
 ||| Verify a struct layout is valid
 public export
-verifyLayout : (fields : Vect n Field) -> (align : Nat) -> Either String StructLayout
+verifyLayout : (fields : Vect k Field) -> (align : Nat) -> Either String StructLayout
 verifyLayout fields align =
-  let size = calcStructSize fields align
-   in case decSo (size >= sum (map (\f => f.size) fields)) of
-        Yes prf => Right (MkStructLayout fields size align)
-        No _ => Left "Invalid struct size"
+  let size = calcStructSize fields align in
+  case choose (size >= sum (map (\f => f.size) fields)) of
+    Right _ => Left "Invalid struct size"
+    Left sizeOk =>
+      case decDivides align size of
+        Nothing => Left "Total size is not a multiple of the alignment"
+        Just alignProof =>
+          Right (MkStructLayout fields size align
+                   {sizeCorrect = sizeOk} {aligned = alignProof})
 
 --------------------------------------------------------------------------------
 -- Nim Object Layout Rules
@@ -148,7 +169,7 @@ nimFieldAlign p ty = min (nimFieldSize p ty) (ptrSize p `div` 8)
 ||| Convert a NimObject to a StructLayout using exportc rules
 ||| (C-compatible: declaration order, natural alignment, trailing padding)
 public export
-nimObjectToLayout : Platform -> NimObject -> Either String StructLayout
+nimObjectToLayout : Platform -> NimObjectDef -> Either String StructLayout
 nimObjectToLayout p obj =
   let fields = computeFields p 0 obj.fields
    in verifyLayout (fromList fields) (maxAlign p obj.fields)
@@ -200,10 +221,25 @@ data CABICompliant : StructLayout -> Type where
     FieldsAligned layout.fields ->
     CABICompliant layout
 
+||| Decide whether every field's offset is aligned to its alignment.
+public export
+decFieldsAligned : (fields : Vect k Field) -> Maybe (FieldsAligned fields)
+decFieldsAligned [] = Just NoFields
+decFieldsAligned (f :: fs) =
+  case decDivides f.alignment f.offset of
+    Nothing => Nothing
+    Just dv =>
+      case decFieldsAligned fs of
+        Nothing => Nothing
+        Just rest => Just (ConsField f fs dv rest)
+
 ||| Check if layout follows C ABI
 public export
 checkCABI : (layout : StructLayout) -> Either String (CABICompliant layout)
-checkCABI layout = Right (CABIOk layout ?fieldsAlignedProof)
+checkCABI layout =
+  case decFieldsAligned layout.fields of
+    Just prf => Right (CABIOk layout prf)
+    Nothing => Left "Struct fields are not correctly aligned for C ABI"
 
 --------------------------------------------------------------------------------
 -- Nim-Specific Layout Examples
@@ -224,6 +260,8 @@ nimBufferLayout =
     ]
     16  -- Total size: 16 bytes
     8   -- Alignment: 8 bytes (pointer)
+    {sizeCorrect = Oh}
+    {aligned = DivideBy 2 Refl}
 
 ||| Example: Nim object with default alignment
 ||| type NimResult {.exportc: "nimiser_result".} = object
@@ -239,16 +277,25 @@ nimResultLayout =
     ]
     16  -- Total size: 16 bytes
     8   -- Alignment: 8 bytes
+    {sizeCorrect = Oh}
+    {aligned = DivideBy 2 Refl}
 
 ||| Proof that buffer layout is valid
 export
-nimBufferLayoutValid : CABICompliant nimBufferLayout
-nimBufferLayoutValid = CABIOk nimBufferLayout ?bufferFieldsAligned
+nimBufferLayoutValid : CABICompliant Layout.nimBufferLayout
+nimBufferLayoutValid =
+  CABIOk nimBufferLayout
+    (ConsField _ _ (DivideBy 0 Refl)
+      (ConsField _ _ (DivideBy 2 Refl)
+        (ConsField _ _ (DivideBy 3 Refl) NoFields)))
 
 ||| Proof that result layout is valid
 export
-nimResultLayoutValid : CABICompliant nimResultLayout
-nimResultLayoutValid = CABIOk nimResultLayout ?resultFieldsAligned
+nimResultLayoutValid : CABICompliant Layout.nimResultLayout
+nimResultLayoutValid =
+  CABIOk nimResultLayout
+    (ConsField _ _ (DivideBy 0 Refl)
+      (ConsField _ _ (DivideBy 1 Refl) NoFields))
 
 --------------------------------------------------------------------------------
 -- Offset Calculation
@@ -262,7 +309,11 @@ fieldOffset layout name =
     Just idx => Just (finToNat idx ** index idx layout.fields)
     Nothing => Nothing
 
-||| Proof that field offset is within struct bounds
+||| Decide whether a field's offset is within struct bounds.
+||| In general a field may exceed the struct, so the result is a Maybe witness.
 public export
-offsetInBounds : (layout : StructLayout) -> (f : Field) -> So (f.offset + f.size <= layout.totalSize)
-offsetInBounds layout f = ?offsetInBoundsProof
+offsetInBounds : (layout : StructLayout) -> (f : Field) -> Maybe (So (f.offset + f.size <= layout.totalSize))
+offsetInBounds layout f =
+  case choose (f.offset + f.size <= layout.totalSize) of
+    Left ok => Just ok
+    Right _ => Nothing
