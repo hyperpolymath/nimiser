@@ -51,6 +51,15 @@ free : Handle -> IO ()
 free h = primIO (prim__free (handlePtr h))
 
 --------------------------------------------------------------------------------
+-- String Marshalling (declared early; used by the generation wrappers below)
+--------------------------------------------------------------------------------
+
+||| Convert C string to Idris String
+export
+%foreign "support:idris2_getString, libidris2_support"
+prim__getString : Bits64 -> String
+
+--------------------------------------------------------------------------------
 -- Nim Compilation Pipeline
 --------------------------------------------------------------------------------
 
@@ -102,7 +111,9 @@ genTemplate h tmpl = do
                    (if tmpl.exported then 1 else 0))
   if ptr == 0
     then pure (Left TemplateError)
-    else pure (Right (prim__getString ptr))
+    else do
+      let str = prim__getString ptr
+      pure (Right str)
 
 ||| Generate Nim macro code from a macro definition
 ||| Returns a C string containing generated Nim source, or null on error.
@@ -121,16 +132,13 @@ genMacro h mac = do
                    (if mac.generatesExport then 1 else 0))
   if ptr == 0
     then pure (Left MacroError)
-    else pure (Right (prim__getString ptr))
+    else do
+      let str = prim__getString ptr
+      pure (Right str)
 
 --------------------------------------------------------------------------------
 -- String Operations
 --------------------------------------------------------------------------------
-
-||| Convert C string to Idris String
-export
-%foreign "support:idris2_getString, libidris2_support"
-prim__getString : Bits64 -> String
 
 ||| Free C string allocated by the Nim library
 export
