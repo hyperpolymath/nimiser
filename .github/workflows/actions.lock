@@ -52,7 +52,7 @@ dependencies:
         owner_id: 44036562
         repo_id: 215566462
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1':
-        ref: '3d3c42e5aac5ba805825da76410c181273ba90b1'
+        ref: 'v7.0.1'
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
@@ -109,7 +109,7 @@ dependencies:
         owner_id: 9919
         repo_id: 259445878
     'goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406':
-        ref: 'abea47f85e598557f500fa1fd2ab7464fcb39406'
+        ref: 'v2.2.1'
         commit: 'sha1-abea47f85e598557f500fa1fd2ab7464fcb39406'
         owner_id: 1006268
         repo_id: 212984112
@@ -144,7 +144,7 @@ dependencies:
         owner_id: 2242
         repo_id: 204253808
     'swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6':
-        ref: '6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+        ref: 'v2.9.2'
         commit: 'sha1-6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
         owner_id: 580492
         repo_id: 298565987
